@@ -49,8 +49,8 @@ flowchart LR
         OS["OSINT-джерела"]
         TI["Картографія"]
     end
-    OP --> SYS
-    AN --> SYS
+    OP -- "HTTPS/REST" --> SYS
+    AN -- "HTTPS/REST" --> SYS
     AD -- "HTTPS/REST · WSS" --> SYS
     DR -- "MQTT/TCP · TLS" --> SYS
     OS -- "HTTPS/REST" --> SYS
@@ -149,8 +149,11 @@ Threat (+ OSINT); [SRS-FUN-08](srs.md#srs-fun-08) → API Gateway + Identity Pro
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'IBM Plex Sans, Segoe UI, sans-serif','fontSize':'14px','primaryColor':'#FBF8F2','primaryTextColor':'#221C18','primaryBorderColor':'#9E2B37','lineColor':'#8C8276'}}}%%
 flowchart TB
-    GW["API Gateway"]:::extn
-    KFK["Apache Kafka"]:::extn
+    subgraph edge["Зовнішні · вхід"]
+        direction LR
+        GW["API Gateway"]:::extn
+        KIN["Apache Kafka<br/><i>threat.added · weather.updated</i>"]:::extn
+    end
 
     subgraph inb["① Inbound"]
         direction LR
@@ -163,10 +166,10 @@ flowchart TB
     subgraph core["② Core · бізнес-логіка"]
         direction LR
         SVC["RoutePlanningService<br/><i>оркестратор</i>"]:::coreMain
+        POL["RoutePolicySelector"]:::core
         GRAPH["RiskGraphBuilder"]:::core
         ASTAR["AStarPathfinder"]:::core
         PD["PDoletuEstimator<br/><i>−ln(p)</i>"]:::core
-        POL["RoutePolicySelector"]:::core
     end
 
     subgraph outb["③ Outbound"]
@@ -178,17 +181,22 @@ flowchart TB
         PUB["RouteEventPublisher<br/><i>Observer</i>"]:::out
     end
 
-    PG[("PostgreSQL+PostGIS")]:::db
-    RD[("Redis")]:::db
+    subgraph data["Сховища та шина · вихід"]
+        direction LR
+        PG[("PostgreSQL+PostGIS")]:::db
+        RD[("Redis")]:::db
+        KOUT["Apache Kafka<br/><i>route.completed</i>"]:::extn
+    end
 
     GW --> GUARD --> VAL --> CTRL --> SVC
-    KFK --> CONS --> SVC
-    SVC --> GRAPH & POL & ASTAR & REPO & CACHE & PUB
-    GRAPH --> TQC & WC
+    KIN --> CONS --> SVC
+    SVC --> POL & GRAPH & ASTAR
     ASTAR --> PD
+    GRAPH --> TQC & WC
+    SVC --> REPO & CACHE & PUB
     REPO --> PG
     CACHE --> RD
-    PUB -. "route.completed" .-> KFK
+    PUB -. "route.completed" .-> KOUT
 
     classDef in fill:#E7EEF0,stroke:#2F5D63,stroke-width:1.5px,color:#13302f
     classDef xcut fill:#F0D9D6,stroke:#9E2B37,stroke-width:1.2px,color:#221C18
@@ -197,9 +205,11 @@ flowchart TB
     classDef out fill:#F6E8CC,stroke:#C08A2E,stroke-width:1.3px,color:#4a3410
     classDef db fill:#EAF3EC,stroke:#2E7D5B,stroke-width:1.5px,color:#13342a
     classDef extn fill:#EFE9DF,stroke:#8C8276,stroke-width:1px,color:#221C18
+    style edge fill:#F3EFE8,stroke:#DDD4C7
     style inb fill:#F3EFE8,stroke:#DDD4C7
     style core fill:#FAF6EF,stroke:#DDD4C7
     style outb fill:#F3EFE8,stroke:#DDD4C7
+    style data fill:#F3EFE8,stroke:#DDD4C7
 ```
 
 **Шари Clean Architecture.** Inbound: `RoutePlanningController` (REST) та `RouteRecalcConsumer`
