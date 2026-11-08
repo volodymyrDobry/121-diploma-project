@@ -1,0 +1,190 @@
+openapi: 3.0.3
+info:
+  title: Шипшина API
+  description: >
+    Інженерний контракт міжсервісної взаємодії системи планування та моніторингу
+    доставки вантажів БПЛА. Трасування: endpoints реалізують вимоги SRS-FUN-01..08.
+  version: 1.0.0
+  contact:
+    name: Dobrianskyi V. V.
+servers:
+  - url: https://api.rosehip.example/api/v1
+    description: Production gateway
+security:
+  - bearerAuth: []
+tags:
+  - name: deliveries
+  - name: routes
+  - name: flights
+  - name: threats
+paths:
+  /deliveries:
+    post:
+      tags: [deliveries]
+      summary: Створити доставку (SRS-FUN-01)
+      operationId: createDelivery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeliveryRequest'
+      responses:
+        '201':
+          description: Доставку створено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Delivery'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /deliveries/{id}/routes:
+    post:
+      tags: [routes]
+      summary: Побудувати маршрути з P_долету (SRS-FUN-02)
+      operationId: planRoutes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanRoutesRequest'
+      responses:
+        '200':
+          description: Перелік альтернативних маршрутів
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 2
+                maxItems: 3
+                items: { $ref: '#/components/schemas/Route' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+  /flights/{id}/track:
+    get:
+      tags: [flights]
+      summary: Трек рейсу в реальному часі (SRS-FUN-04)
+      operationId: getFlightTrack
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Точки треку
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TelemetryPoint' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth 2.0 / OIDC access-токен (RS256), TTL <= 15 хв
+  responses:
+    BadRequest:
+      description: Помилка валідації вхідних даних
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Відсутній або недійсний JWT
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Недостатньо прав (RBAC/ABAC)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Ресурс не знайдено
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Перевищено rate limit
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    DependencyUnavailable:
+      description: Залежний сервіс недоступний (circuit breaker відкрито)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    GeoPoint:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat: { type: number, format: double, minimum: -90, maximum: 90 }
+        lon: { type: number, format: double, minimum: -180, maximum: 180 }
+    CreateDeliveryRequest:
+      type: object
+      required: [destination, weightKg]
+      additionalProperties: false
+      properties:
+        destination: { $ref: '#/components/schemas/GeoPoint' }
+        origin: { $ref: '#/components/schemas/GeoPoint' }
+        weightKg: { type: number, minimum: 0.1, maximum: 50 }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
+    Delivery:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [DRAFT, PLANNED, IN_FLIGHT, DELIVERED, FAILED, LOST]
+        createdAt: { type: string, format: date-time }
+    PlanRoutesRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        policy:
+          type: string
+          enum: [SAFEST, BALANCED, FASTEST]
+          default: BALANCED
+    Route:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        pDelivery: { type: number, format: double, minimum: 0, maximum: 1 }
+        etaSec: { type: integer, minimum: 0 }
+        energyPct: { type: number, minimum: 0, maximum: 100 }
+    TelemetryPoint:
+      type: object
+      properties:
+        seq: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        position: { $ref: '#/components/schemas/GeoPoint' }
+        altitudeM: { type: integer }
+        batteryPct: { type: number, minimum: 0, maximum: 100 }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: ROUTE_DEPENDENCY_UNAVAILABLE }
+        message: { type: string }
+        traceId: { type: string }
